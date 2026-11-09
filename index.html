@@ -121,6 +121,21 @@
   .topic-stat{display:flex; justify-content:space-between; font-size:13px; padding:5px 0; border-bottom:1px solid var(--bg);}
   .topic-stat:last-child{border-bottom:none;}
   .foot{color:var(--muted); font-size:12px; text-align:center; margin-top:20px; line-height:1.7;}
+  /* 모의고사 */
+  .timer{font-size:30px; font-weight:800; text-align:center; letter-spacing:1px; margin:2px 0 10px;}
+  .timer.warn{color:var(--bad);}
+  .palette{display:flex; flex-wrap:wrap; gap:6px;}
+  .pal-btn{width:34px; height:34px; border:1px solid var(--line); background:#fff; border-radius:8px; font-size:13px; cursor:pointer; color:var(--ink); padding:0;}
+  .pal-btn.done{background:var(--accent); border-color:var(--accent); color:#fff;}
+  .pal-btn.cur{border-color:var(--ink); border-width:2px; font-weight:700;}
+  .choice.selected{border-color:var(--accent); background:#eef3ee;}
+  .choice.selected .no{background:var(--accent); color:#fff;}
+  .fail-banner{background:var(--bad-bg); border:1px solid var(--bad); border-radius:12px; padding:12px 14px; font-size:14px; margin-bottom:12px;}
+  .confirm-box{background:var(--vague-bg); border:1px solid var(--vague); border-radius:12px; padding:12px 14px; font-size:14px; margin-top:12px;}
+  .verdict{font-size:26px; font-weight:800; text-align:center; margin:6px 0;}
+  .verdict.pass{color:var(--ok);}
+  .verdict.fail{color:var(--bad);}
+  .verdict-sub{font-size:14px; font-weight:400; color:var(--muted); margin-top:4px;}
 </style>
 </head>
 <body>
@@ -163,6 +178,29 @@
       <button class="btn btn-ghost" id="btn-review">복습하기 <span id="review-count"></span></button>
     </div>
 
+    <div class="card">
+      <h2>회차로 풀기 (모의고사)</h2>
+      <div class="row">
+        <label>회차
+          <select id="ex-round"></select>
+        </label>
+        <label>차수
+          <select id="ex-level">
+            <option value="1">1차</option>
+            <option value="2">2차</option>
+          </select>
+        </label>
+      </div>
+      <div class="count" id="exam-info"></div>
+      <button class="btn btn-primary" id="btn-exam-start">모의고사 시작 (80분)</button>
+      <button class="btn btn-ghost hidden" id="btn-exam-resume"></button>
+    </div>
+
+    <div class="card">
+      <h2>모의고사 기록</h2>
+      <div id="exam-history"></div>
+    </div>
+
   </div>
 
   <!-- ===== 퀴즈 ===== -->
@@ -171,11 +209,25 @@
       <button class="link-btn" id="btn-quit">← 그만 풀기</button>
       <div class="progress" id="quiz-progress"></div>
     </div>
+    <div id="exam-timer" class="timer hidden">80:00</div>
+    <div id="exam-failbanner" class="fail-banner hidden"></div>
     <div class="bar"><i id="quiz-bar" style="width:0%"></i></div>
     <div class="card" id="quiz-card"></div>
     <div class="nav-row">
       <button class="btn btn-ghost" id="btn-prev">이전 문제</button>
       <button class="btn btn-primary" id="btn-next">다음 문제</button>
+    </div>
+    <button class="btn btn-ghost hidden" id="btn-exam-submit">결과 보기</button>
+    <div id="exam-confirm" class="confirm-box hidden">
+      <div id="exam-confirm-text"></div>
+      <div class="row">
+        <button class="btn btn-primary btn-small" id="btn-exam-confirm-yes" style="flex:1;margin-top:0;">그래도 결과 보기</button>
+        <button class="btn btn-ghost btn-small" id="btn-exam-confirm-no" style="flex:1;margin-top:0;">계속 풀기</button>
+      </div>
+    </div>
+    <div class="card hidden" id="exam-palette-card">
+      <h2>문제 목록</h2>
+      <div class="palette" id="exam-palette"></div>
     </div>
   </div>
 
@@ -190,6 +242,21 @@
       <div id="res-list"></div>
       <button class="btn btn-primary" id="btn-again">같은 조건으로 5문제 더</button>
       <button class="btn btn-ghost" id="btn-home1">처음으로</button>
+    </div>
+  </div>
+
+  <!-- ===== 모의고사 결과 ===== -->
+  <div id="view-exam-result" class="hidden">
+    <header>
+      <h1>모의고사 결과</h1>
+      <div class="sub" id="exam-res-sub"></div>
+    </header>
+    <div class="card">
+      <div class="verdict" id="exam-verdict"></div>
+      <div id="exam-scores" style="margin:10px 0;"></div>
+      <div id="exam-wrong-list"></div>
+      <button class="btn btn-primary" id="btn-exam-again">같은 회차 다시 풀기</button>
+      <button class="btn btn-ghost" id="btn-exam-home">처음으로</button>
     </div>
   </div>
 
@@ -255,6 +322,53 @@ function pickRandom(arr, n){
   return a.slice(0, n);
 }
 function grade(q, choiceIdx){ return (choiceIdx + 1) === q.answer; }
+
+/*__EXAM_PURE_START__*/
+/* 회차 모의고사 순수 로직 — exam-test.js가 이 구간을 추출해 단위 테스트한다. */
+const EXAM_MINUTES = 80;
+const EXAM_LEVELS = {1: ['beophakgaeron', 'mingangyeongbiron'], 2: ['gyeongbiupbeop', 'gyeonghohak']};
+const EPS = 1e-9; // 부동소수점 경계값(40.0 / 60.0) 오차 방지용
+function examCount(list, answers){
+  // list: [{_sid, id, answer}], answers: {'sid:id': 선택 인덱스(0-based)}
+  const counts = {};
+  list.forEach(q => {
+    const c = counts[q._sid] || (counts[q._sid] = {sid: q._sid, total: 0, correct: 0, wrong: 0, unanswered: 0});
+    c.total++;
+    const a = answers[q._sid + ':' + q.id];
+    if (a === undefined) c.unanswered++;
+    else if ((a + 1) === q.answer) c.correct++;
+    else c.wrong++;
+  });
+  return counts;
+}
+function examScores(counts){
+  return Object.values(counts).map(c => {
+    const score = c.total ? c.correct / c.total * 100 : 0;
+    // maxScore: 안 푼 문제를 전부 맞았다고 가정한 최대 점수
+    const maxScore = c.total ? (c.total - c.wrong) / c.total * 100 : 0;
+    return {sid: c.sid, total: c.total, correct: c.correct, wrong: c.wrong, unanswered: c.unanswered, score: score, maxScore: maxScore};
+  });
+}
+function examVerdict(level, scores){
+  const avg = scores.reduce((a, s) => a + s.score, 0) / scores.length;
+  const maxAvg = scores.reduce((a, s) => a + s.maxScore, 0) / scores.length;
+  if (level === 1){
+    const failed = scores.filter(s => s.score < 40 - EPS);
+    if (failed.length) return {passed: false, reason: '과락', failedSubjects: failed.map(s => s.sid), avg: avg, maxAvg: maxAvg};
+    if (avg < 60 - EPS) return {passed: false, reason: '평균 미달', failedSubjects: [], avg: avg, maxAvg: maxAvg};
+    return {passed: true, reason: '합격', failedSubjects: [], avg: avg, maxAvg: maxAvg};
+  }
+  if (avg < 60 - EPS) return {passed: false, reason: '평균 미달', failedSubjects: [], avg: avg, maxAvg: maxAvg};
+  return {passed: true, reason: '합격권', failedSubjects: [], avg: avg, maxAvg: maxAvg};
+}
+function examFailConfirmed(level, scores){
+  // 1차: 어느 과목이든 최대 점수가 40 미만이면 과락 확정. 1·2차 공통: 최대 가능 평균이 60 미만이면 확정.
+  if (level === 1 && scores.some(s => s.maxScore < 40 - EPS)) return true;
+  const maxAvg = scores.reduce((a, s) => a + s.maxScore, 0) / scores.length;
+  return maxAvg < 60 - EPS;
+}
+function fmtScore(x){ return (Math.round(x * 10) / 10).toFixed(1); }
+/*__EXAM_PURE_END__*/
 
 /* ---------- 필터 UI ---------- */
 const TOPIC_ORDERS = {'gyeongbiupbeop': ['허가','결격사유','교육','배치','무기','복장','장비·출동차량','과태료','벌칙','행정처분','청문','청원경찰','기계경비','특수경비','경비지도사','범죄경력조회','수수료','집단민원현장','공제사업·경비협회','감독','손해배상','도급','총칙·정의','의무·책임','허가취소·행정처분'],
@@ -357,8 +471,14 @@ function renderStats(){
 }
 renderStats();
 
+/* 모의고사 설정 초기화 */
+fillSelect(document.getElementById('ex-round'), examRoundOptions(), '회차 선택');
+document.getElementById('ex-round').value = '27회';
+updateExamInfo();
+renderExamHistory();
+
 /* ---------- 화면 전환 ---------- */
-const views = ['home','quiz','result','review'];
+const views = ['home','quiz','result','review','exam-result'];
 function show(name){
   views.forEach(v => document.getElementById('view-' + v).classList.toggle('hidden', v !== name));
   try{ window.scrollTo(0, 0); }catch(e){}
@@ -405,6 +525,7 @@ let quiz = [], qi = 0, answers = {}; // answers[qid] = 선택 인덱스(0-based)
 const CIRCLE = ['①','②','③','④'];
 
 function startQuiz(list){
+  endExamMode();
   quiz = pickRandom(list, 5);
   qi = 0; answers = {};
   renderQuestion();
@@ -481,12 +602,307 @@ document.getElementById('btn-start').addEventListener('click', () => {
   if (!list.length) return;
   startQuiz(list);
 });
-document.getElementById('btn-quit').addEventListener('click', () => { renderStats(); show('home'); });
-document.getElementById('btn-prev').addEventListener('click', () => { if (qi > 0){ qi--; renderQuestion(); } });
+document.getElementById('btn-quit').addEventListener('click', () => {
+  if (exam){ saveExamState(); endExamMode(); renderStats(); renderExamHistory(); show('home'); return; }
+  renderStats(); show('home');
+});
+document.getElementById('btn-prev').addEventListener('click', () => {
+  if (exam){ if (exam.qi > 0){ exam.qi--; saveExamState(); renderExamQuestion(); } return; }
+  if (qi > 0){ qi--; renderQuestion(); }
+});
 document.getElementById('btn-next').addEventListener('click', () => {
+  if (exam){
+    if (exam.qi < exam.list.length - 1){ exam.qi++; saveExamState(); renderExamQuestion(); }
+    else { requestExamSubmit(false); }
+    return;
+  }
   if (qi < quiz.length - 1){ qi++; renderQuestion(); }
   else { showResult(); }
 });
+
+/* ---------- 회차 모의고사 ---------- */
+let exam = null; // {round, level, list, qi, answers, endsAt, startedAt, failShown}
+let examTimerId = null;
+let lastExamMeta = null;
+function examKey(q){ return q._sid + ':' + q.id; }
+function examStateKey(round, level){ return 'gichul_exam_' + round + '_' + level + '차'; }
+function examQuestions(round, level){
+  const list = [];
+  EXAM_LEVELS[level].forEach(sid => {
+    SUBJECTS[sid].questions.filter(q => q.round === round)
+      .slice().sort((a, b) => a.no - b.no)
+      .forEach(q => { const c = Object.assign({}, q); c._sid = sid; list.push(c); });
+  });
+  return list;
+}
+function saveExamState(){
+  if (!exam) return;
+  try{ localStorage.setItem(examStateKey(exam.round, exam.level), JSON.stringify({round: exam.round, level: exam.level, answers: exam.answers, qi: exam.qi, endsAt: exam.endsAt, startedAt: exam.startedAt})); }catch(e){}
+}
+function loadExamState(round, level){
+  try{ return JSON.parse(localStorage.getItem(examStateKey(round, level))); }catch(e){ return null; }
+}
+function clearExamState(round, level){
+  try{ localStorage.removeItem(examStateKey(round, level)); }catch(e){}
+}
+function stopExamTimer(){ if (examTimerId){ clearInterval(examTimerId); examTimerId = null; } }
+function setExamMode(on){
+  ['exam-timer','exam-palette-card','btn-exam-submit'].forEach(id => document.getElementById(id).classList.toggle('hidden', !on));
+  if (!on){
+    document.getElementById('exam-failbanner').classList.add('hidden');
+    hideExamConfirm();
+  }
+}
+function endExamMode(){ stopExamTimer(); exam = null; setExamMode(false); }
+function hideExamConfirm(){ document.getElementById('exam-confirm').classList.add('hidden'); }
+
+function startExam(round, level, opts){
+  opts = opts || {};
+  const list = examQuestions(round, level);
+  if (!list.length) return;
+  stopExamTimer();
+  const saved = opts.resume ? loadExamState(round, level) : null;
+  exam = {
+    round: round, level: level, list: list, qi: 0,
+    answers: saved ? (saved.answers || {}) : {},
+    endsAt: saved && saved.endsAt ? saved.endsAt : Date.now() + EXAM_MINUTES * 60 * 1000,
+    startedAt: saved && saved.startedAt ? saved.startedAt : Date.now(),
+    failShown: false
+  };
+  if (saved && typeof saved.qi === 'number') exam.qi = Math.min(saved.qi, list.length - 1);
+  setExamMode(true);
+  hideExamConfirm();
+  renderExamQuestion();
+  saveExamState();
+  startExamTimer();
+  examCheckFail();
+  show('quiz');
+}
+function startExamTimer(){
+  stopExamTimer();
+  updateExamTimer();
+  examTimerId = setInterval(updateExamTimer, 1000);
+}
+function updateExamTimer(){
+  if (!exam) return;
+  const remain = Math.max(0, exam.endsAt - Date.now());
+  // 남은 초는 올림으로 표시: 시작 직후 80:00, 종료 순간 00:00
+  const totalSec = Math.ceil(remain / 1000);
+  const m = Math.floor(totalSec / 60), s = totalSec % 60;
+  const el = document.getElementById('exam-timer');
+  el.textContent = String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+  el.classList.toggle('warn', remain <= 10 * 60 * 1000 && remain > 0);
+  if (remain <= 0){ stopExamTimer(); submitExam(true); }
+}
+function renderExamQuestion(){
+  const q = exam.list[exam.qi];
+  const sel = exam.answers[examKey(q)];
+  document.getElementById('quiz-progress').textContent = (exam.qi + 1) + ' / ' + exam.list.length;
+  document.getElementById('quiz-bar').style.width = ((exam.qi + 1) / exam.list.length * 100) + '%';
+  document.getElementById('btn-prev').style.visibility = exam.qi === 0 ? 'hidden' : 'visible';
+  document.getElementById('btn-next').textContent = exam.qi === exam.list.length - 1 ? '결과 보기' : '다음 문제';
+  const card = document.getElementById('quiz-card');
+  let html = '<div class="qmeta">' +
+    '<span class="tag">' + SUBJECTS[q._sid].short + '</span>' +
+    '<span class="tag">' + q.round + ' ' + q.no + '번</span>' +
+    '<span class="tag">' + q.basis + '</span>' +
+    (q.article ? '<span class="tag art">' + q.article + '</span>' : '') +
+    q.topics.map(t => '<span class="tag">' + t + '</span>').join('') +
+    '</div>' +
+    '<div class="qstem">' + escapeHtml(q.stem) + '</div><div>';
+  q.choices.forEach((c, i) => {
+    html += '<button class="choice' + (sel === i ? ' selected' : '') + '" data-i="' + i + '">' +
+      '<span class="no">' + CIRCLE[i] + '</span><span>' + escapeHtml(c) + '</span></button>';
+  });
+  html += '</div>';
+  card.innerHTML = html;
+  card.querySelectorAll('.choice').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const i = parseInt(btn.dataset.i, 10);
+      exam.answers[examKey(q)] = i;
+      saveExamState();
+      renderExamQuestion();
+      examCheckFail();
+    });
+  });
+  renderPalette();
+}
+function renderPalette(){
+  const el = document.getElementById('exam-palette');
+  el.innerHTML = exam.list.map((q, i) => {
+    const a = exam.answers[examKey(q)] !== undefined;
+    return '<button type="button" class="pal-btn' + (a ? ' done' : '') + (i === exam.qi ? ' cur' : '') + '" data-i="' + i + '">' + (i + 1) + '</button>';
+  }).join('');
+  el.querySelectorAll('.pal-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      exam.qi = parseInt(btn.dataset.i, 10);
+      saveExamState();
+      renderExamQuestion();
+    });
+  });
+}
+function examCheckFail(){
+  if (!exam || exam.failShown) return;
+  const scores = examScores(examCount(exam.list, exam.answers));
+  if (examFailConfirmed(exam.level, scores)){
+    exam.failShown = true;
+    const b = document.getElementById('exam-failbanner');
+    b.innerHTML = '<b>불합격이 확정됐어요.</b> 남은 문제는 연습으로 이어가거나, 그만하고 결과를 볼 수 있어요.' +
+      '<div class="row"><button class="btn btn-ghost btn-small" id="btn-fail-continue" style="flex:1;margin-top:0;">계속 풀기</button>' +
+      '<button class="btn btn-primary btn-small" id="btn-fail-result" style="flex:1;margin-top:0;">결과 보기</button></div>';
+    b.classList.remove('hidden');
+    document.getElementById('btn-fail-continue').addEventListener('click', () => b.classList.add('hidden'));
+    document.getElementById('btn-fail-result').addEventListener('click', () => requestExamSubmit(false));
+  }
+}
+function requestExamSubmit(timeUp){
+  if (!exam) return;
+  const un = exam.list.filter(q => exam.answers[examKey(q)] === undefined).length;
+  if (un > 0 && !timeUp){
+    document.getElementById('exam-confirm-text').textContent = un + '문제 안 풀었어요. 그래도 결과를 볼까요?';
+    document.getElementById('exam-confirm').classList.remove('hidden');
+    return;
+  }
+  submitExam(timeUp);
+}
+function recordExamAttempts(ex){
+  ex.list.forEach(q => {
+    const a = ex.answers[examKey(q)];
+    if (a === undefined) return;
+    const key = 'gichul_quiz_' + q._sid;
+    let s = {};
+    try{ s = JSON.parse(localStorage.getItem(key)) || {}; }catch(e){}
+    const r = s[q.id] || {attempts: 0, correct: 0, wrong: 0, vague: false, memo: ''};
+    const ok = (a + 1) === q.answer;
+    r.attempts = (r.attempts || 0) + 1;
+    r.correct = (r.correct || 0) + (ok ? 1 : 0);
+    r.wrong = (r.wrong || 0) + (ok ? 0 : 1);
+    r.lastAt = Date.now();
+    s[q.id] = r;
+    try{ localStorage.setItem(key, JSON.stringify(s)); }catch(e){}
+  });
+  store = loadStore(); // 현재 과목 메모리 기록 갱신
+}
+function submitExam(timeUp){
+  if (!exam) return;
+  const ex = exam;
+  const counts = examCount(ex.list, ex.answers);
+  const scores = examScores(counts);
+  const verdict = examVerdict(ex.level, scores);
+  recordExamAttempts(ex);
+  const entry = {
+    round: ex.round, level: ex.level, date: new Date().toISOString().slice(0, 10),
+    scores: scores.map(s => ({short: SUBJECTS[s.sid].short, correct: s.correct, total: s.total, score: s.score})),
+    avg: verdict.avg, passed: verdict.passed, reason: verdict.reason, timeUp: !!timeUp
+  };
+  saveExamHistory(entry);
+  clearExamState(ex.round, ex.level);
+  lastExamMeta = {round: ex.round, level: ex.level};
+  renderExamResult(entry, ex, scores, verdict, timeUp);
+  endExamMode();
+  renderStats();
+  show('exam-result');
+}
+function renderExamResult(entry, ex, scores, verdict, timeUp){
+  document.getElementById('exam-res-sub').textContent =
+    ex.round + ' ' + ex.level + '차 모의고사 · ' + ex.list.length + '문항' + (timeUp ? ' · 시간 종료로 제출됐어요' : '');
+  const v = document.getElementById('exam-verdict');
+  v.className = 'verdict ' + (verdict.passed ? 'pass' : 'fail');
+  if (verdict.passed){
+    v.innerHTML = (ex.level === 1 ? '합격' : '평균 60점 이상 — 합격권') +
+      '<div class="verdict-sub">평균 ' + fmtScore(verdict.avg) + '점' + (ex.level === 2 ? ' · 최종 합격은 선발인원 내 고득점순이에요' : '') + '</div>';
+  } else {
+    const reason = verdict.reason === '과락'
+      ? verdict.failedSubjects.map(sid => SUBJECTS[sid].short).join(', ') + ' 과락 (40점 미만)'
+      : '평균 ' + fmtScore(verdict.avg) + '점으로 60점 미달';
+    v.innerHTML = '불합격<div class="verdict-sub">' + reason + '</div>';
+  }
+  document.getElementById('exam-scores').innerHTML = scores.map(s =>
+    '<div class="topic-stat"><span>' + SUBJECTS[s.sid].short + ' (' + s.correct + '/' + s.total + ')</span><span>' +
+    fmtScore(s.score) + '점' + (ex.level === 1 && s.score < 40 - EPS ? ' · 과락' : '') + '</span></div>'
+  ).join('') +
+  '<div class="topic-stat"><span>평균</span><span>' + fmtScore(verdict.avg) + '점</span></div>';
+  const wrongs = ex.list.filter(q => {
+    const a = ex.answers[examKey(q)];
+    return a === undefined || (a + 1) !== q.answer;
+  });
+  document.getElementById('exam-wrong-list').innerHTML = wrongs.length ? wrongs.map(q => {
+    const a = ex.answers[examKey(q)];
+    return '<div class="res-item"><span class="mark bad">' + (a === undefined ? '안 품' : '오답') + '</span>' +
+      ' <span style="color:var(--muted);">' + SUBJECTS[q._sid].short + ' ' + q.round + ' ' + q.no + '번</span>' +
+      '<div class="stem">' + escapeHtml(q.stem.slice(0, 70)) + (q.stem.length > 70 ? '…' : '') + '</div>' +
+      '<div style="font-size:13px;margin-top:4px;">정답: ' + CIRCLE[q.answer - 1] + ' ' + escapeHtml(q.choices[q.answer - 1]) + '</div>' +
+      (q.hint ? '<div style="font-size:13px;margin-top:4px;">' + escapeHtml(q.hint) + '</div>' : '') +
+      '</div>';
+  }).join('') : '<div class="empty">틀린 문제가 없어요. 완벽해요!</div>';
+}
+/* 모의고사 이력 */
+function loadExamHistory(){
+  try{ return JSON.parse(localStorage.getItem('gichul_exam_history')) || []; }catch(e){ return []; }
+}
+function saveExamHistory(entry){
+  const h = loadExamHistory();
+  h.unshift(entry);
+  try{ localStorage.setItem('gichul_exam_history', JSON.stringify(h.slice(0, 20))); }catch(e){}
+}
+function renderExamHistory(){
+  const h = loadExamHistory();
+  const el = document.getElementById('exam-history');
+  if (!h.length){
+    el.innerHTML = '<div class="empty">아직 모의고사 기록이 없어요.<br>회차를 통째로 풀면 여기에 기록이 쌓입니다.</div>';
+    return;
+  }
+  el.innerHTML = h.slice(0, 5).map(e =>
+    '<div class="topic-stat"><span>' + e.round + ' ' + e.level + '차 · ' + e.date + '</span><span>평균 ' + fmtScore(e.avg) + '점 · ' + (e.passed ? '합격' : '불합격') + '</span></div>'
+  ).join('');
+}
+/* 모의고사 설정 (홈) */
+function examRoundOptions(){
+  const rounds = new Set();
+  Object.values(SUBJECTS).forEach(s => s.questions.forEach(q => rounds.add(q.round)));
+  return [...rounds].sort();
+}
+function updateExamInfo(){
+  const round = document.getElementById('ex-round').value;
+  const level = parseInt(document.getElementById('ex-level').value, 10);
+  const list = examQuestions(round, level);
+  const excluded = 80 - list.length;
+  const counts = EXAM_LEVELS[level].map(sid => {
+    const n = list.filter(q => q._sid === sid).length;
+    return SUBJECTS[sid].short + ' ' + n;
+  }).join(' + ');
+  document.getElementById('exam-info').innerHTML =
+    round + ' ' + level + '차 · <b>' + list.length + '문항</b>' + (excluded > 0 ? ' (구법 제외 ' + excluded + '문항)' : '') +
+    ' · 80분 · ' + counts;
+  const saved = loadExamState(round, level);
+  const rb = document.getElementById('btn-exam-resume');
+  if (saved){
+    const done = Object.keys(saved.answers || {}).length;
+    const remain = Math.max(0, (saved.endsAt || 0) - Date.now());
+    const m = Math.floor(remain / 60000), s = Math.floor(remain % 60000 / 1000);
+    rb.textContent = '이어하기 (' + done + '문제 풀었음 · 남은 ' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0') + ')';
+    rb.classList.remove('hidden');
+  } else rb.classList.add('hidden');
+}
+document.getElementById('btn-exam-start').addEventListener('click', () => {
+  const round = document.getElementById('ex-round').value;
+  const level = parseInt(document.getElementById('ex-level').value, 10);
+  startExam(round, level, {});
+});
+document.getElementById('btn-exam-resume').addEventListener('click', () => {
+  const round = document.getElementById('ex-round').value;
+  const level = parseInt(document.getElementById('ex-level').value, 10);
+  startExam(round, level, {resume: true});
+});
+document.getElementById('btn-exam-submit').addEventListener('click', () => requestExamSubmit(false));
+document.getElementById('btn-exam-confirm-yes').addEventListener('click', () => { hideExamConfirm(); submitExam(false); });
+document.getElementById('btn-exam-confirm-no').addEventListener('click', hideExamConfirm);
+document.getElementById('ex-round').addEventListener('change', updateExamInfo);
+document.getElementById('ex-level').addEventListener('change', updateExamInfo);
+document.getElementById('btn-exam-again').addEventListener('click', () => {
+  if (lastExamMeta) startExam(lastExamMeta.round, lastExamMeta.level, {});
+});
+document.getElementById('btn-exam-home').addEventListener('click', () => { renderStats(); renderExamHistory(); updateExamInfo(); show('home'); });
 
 /* ---------- 결과 ---------- */
 function showResult(){
