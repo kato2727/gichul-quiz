@@ -505,6 +505,11 @@ function renderSubjectTabs(){
     b.onclick = () => switchSubject(id);
     el.appendChild(b);
   });
+  const trap = document.createElement('button');
+  trap.type = 'button';
+  trap.textContent = '암기집';
+  trap.onclick = () => { location.href = 'trap-study.html'; };
+  el.appendChild(trap);
 }
 function switchSubject(id){
   if (id === activeSubject || !SUBJECTS[id]) return;
