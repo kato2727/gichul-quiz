@@ -10,6 +10,8 @@
   header { padding: 20px 16px 8px; max-width: 720px; margin: 0 auto; }
   h1 { font-size: 20px; margin: 0 0 4px; }
   .sub { color: #666; font-size: 13px; margin: 0 0 12px; }
+  .back { display: inline-block; font-size: 13px; color: #2e4a3a; text-decoration: none; margin-bottom: 10px; }
+  .criterion { font-size: 13px; line-height: 1.55; color: #555; background: #f7f3ea; border-radius: 8px; padding: 8px 10px; margin: 0 0 12px; }
   .tabs { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 16px; max-width: 720px; margin: 0 auto 8px; }
   .tabs button { border: 1px solid #c9c2b2; background: #fff; border-radius: 999px; padding: 7px 13px; font-size: 14px; cursor: pointer; }
   .tabs button.on { background: #2e4a3a; color: #fff; border-color: #2e4a3a; }
@@ -36,8 +38,10 @@
 </head>
 <body>
 <header>
+  <a class="back" href="index.html">← 퀴즈로 돌아가기</a>
   <h1>함정 지문 암기집</h1>
   <p class="sub">숫자·단어 하나만 바꿔서 출제한 기출 함정 216문항 — 빨간 부분이 바뀐 곳입니다.</p>
+  <p class="criterion">참고: 민간경비론은 숫자 함정보다 개념 뒤집기(있다/없다, 신고/허가 등) 함정이 많습니다.</p>
 </header>
 <nav class="tabs" id="tabs"></nav>
 <div class="filters" id="filters"></div>
