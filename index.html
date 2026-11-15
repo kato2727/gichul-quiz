@@ -795,10 +795,12 @@ function submitExam(timeUp){
   const scores = examScores(counts);
   const verdict = examVerdict(ex.level, scores);
   recordExamAttempts(ex);
+  const remainMs = Math.max(0, ex.endsAt - Date.now());
+  const elapsedMin = Math.min(EXAM_MINUTES, Math.max(0, Math.round((EXAM_MINUTES * 60 * 1000 - remainMs) / 60000)));
   const entry = {
     round: ex.round, level: ex.level, date: new Date().toISOString().slice(0, 10),
     scores: scores.map(s => ({short: SUBJECTS[s.sid].short, correct: s.correct, total: s.total, score: s.score})),
-    avg: verdict.avg, passed: verdict.passed, reason: verdict.reason, timeUp: !!timeUp
+    avg: verdict.avg, passed: verdict.passed, reason: verdict.reason, timeUp: !!timeUp, elapsedMin: elapsedMin
   };
   saveExamHistory(entry);
   clearExamState(ex.round, ex.level);
@@ -810,7 +812,7 @@ function submitExam(timeUp){
 }
 function renderExamResult(entry, ex, scores, verdict, timeUp){
   document.getElementById('exam-res-sub').textContent =
-    ex.round + ' ' + ex.level + '차 모의고사 · ' + ex.list.length + '문항' + (timeUp ? ' · 시간 종료로 제출됐어요' : '');
+    ex.round + ' ' + ex.level + '차 모의고사 · ' + ex.list.length + '문항' + (timeUp ? ' · 시간 종료로 제출됐어요' : '') + ' · ' + entry.elapsedMin + '분 소요';
   const v = document.getElementById('exam-verdict');
   v.className = 'verdict ' + (verdict.passed ? 'pass' : 'fail');
   if (verdict.passed){
@@ -858,7 +860,7 @@ function renderExamHistory(){
     return;
   }
   el.innerHTML = h.slice(0, 5).map(e =>
-    '<div class="topic-stat"><span>' + e.round + ' ' + e.level + '차 · ' + e.date + '</span><span>평균 ' + fmtScore(e.avg) + '점 · ' + (e.passed ? '합격' : '불합격') + '</span></div>'
+    '<div class="topic-stat"><span>' + e.round + ' ' + e.level + '차 · ' + e.date + '</span><span>평균 ' + fmtScore(e.avg) + '점 · ' + (e.passed ? '합격' : '불합격') + (e.elapsedMin != null ? ' · ' + e.elapsedMin + '분' : '') + '</span></div>'
   ).join('');
 }
 /* 모의고사 설정 (홈) */
