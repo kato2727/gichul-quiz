@@ -816,8 +816,8 @@ function renderExamResult(entry, ex, scores, verdict, timeUp){
   const v = document.getElementById('exam-verdict');
   v.className = 'verdict ' + (verdict.passed ? 'pass' : 'fail');
   if (verdict.passed){
-    v.innerHTML = (ex.level === 1 ? '합격' : '평균 60점 이상 — 합격권') +
-      '<div class="verdict-sub">평균 ' + fmtScore(verdict.avg) + '점' + (ex.level === 2 ? ' · 최종 합격은 선발인원 내 고득점순이에요' : '') + '</div>';
+    v.innerHTML = (ex.level === 1 ? '합격' : '선발 기준 통과') +
+      '<div class="verdict-sub">평균 ' + fmtScore(verdict.avg) + '점' + (ex.level === 2 ? ' · 최근 3년 합격선 93.75~95점 — 60점은 출발선일 뿐이에요' : '') + '</div>';
   } else {
     const reason = verdict.reason === '과락'
       ? verdict.failedSubjects.map(sid => SUBJECTS[sid].short).join(', ') + ' 과락 (40점 미만)'
@@ -860,7 +860,7 @@ function renderExamHistory(){
     return;
   }
   el.innerHTML = h.slice(0, 5).map(e =>
-    '<div class="topic-stat"><span>' + e.round + ' ' + e.level + '차 · ' + e.date + '</span><span>평균 ' + fmtScore(e.avg) + '점 · ' + (e.passed ? '합격' : '불합격') + (e.elapsedMin != null ? ' · ' + e.elapsedMin + '분' : '') + '</span></div>'
+    '<div class="topic-stat"><span>' + e.round + ' ' + e.level + '차 · ' + e.date + '</span><span>평균 ' + fmtScore(e.avg) + '점 · ' + (e.passed ? (e.level === 2 ? '기준 통과' : '합격') : '불합격') + (e.elapsedMin != null ? ' · ' + e.elapsedMin + '분' : '') + '</span></div>'
   ).join('');
 }
 /* 모의고사 설정 (홈) */
