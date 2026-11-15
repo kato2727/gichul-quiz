@@ -191,6 +191,15 @@
           </select>
         </label>
       </div>
+      <div class="row hidden" id="ex-scope-row">
+        <label>과목
+          <select id="ex-scope">
+            <option value="both">경비업법 + 경호학</option>
+            <option value="gyeongbiupbeop">경비업법만</option>
+            <option value="gyeonghohak">경호학만</option>
+          </select>
+        </label>
+      </div>
       <div class="count" id="exam-info"></div>
       <button class="btn btn-primary" id="btn-exam-start">모의고사 시작 (80분)</button>
       <button class="btn btn-ghost hidden" id="btn-exam-resume"></button>
@@ -327,6 +336,16 @@ function grade(q, choiceIdx){ return (choiceIdx + 1) === q.answer; }
 /* 회차 모의고사 순수 로직 — exam-test.js가 이 구간을 추출해 단위 테스트한다. */
 const EXAM_MINUTES = 80;
 const EXAM_LEVELS = {1: ['beophakgaeron', 'mingangyeongbiron'], 2: ['gyeongbiupbeop', 'gyeonghohak']};
+function examScopeSubjects(level, scope){
+  // 2차 과목 선택: 'both' = 경비업법+경호학, 그 외는 해당 과목만. 1차는 항상 둘 다.
+  if (level === 2 && scope === 'gyeongbiupbeop') return ['gyeongbiupbeop'];
+  if (level === 2 && scope === 'gyeonghohak') return ['gyeonghohak'];
+  return EXAM_LEVELS[level];
+}
+function examMinutes(level, scope){
+  // 단일 과목(40문항)은 40분, 둘 다(80문항)는 80분. 1분/문항.
+  return (level === 2 && scope && scope !== 'both') ? 40 : EXAM_MINUTES;
+}
 const EPS = 1e-9; // 부동소수점 경계값(40.0 / 60.0) 오차 방지용
 function examCount(list, answers){
   // list: [{_sid, id, answer}], answers: {'sid:id': 선택 인덱스(0-based)}
@@ -349,7 +368,7 @@ function examScores(counts){
     return {sid: c.sid, total: c.total, correct: c.correct, wrong: c.wrong, unanswered: c.unanswered, score: score, maxScore: maxScore};
   });
 }
-function examVerdict(level, scores){
+function examVerdict(level, scores, scope){
   const avg = scores.reduce((a, s) => a + s.score, 0) / scores.length;
   const maxAvg = scores.reduce((a, s) => a + s.maxScore, 0) / scores.length;
   if (level === 1){
@@ -359,6 +378,7 @@ function examVerdict(level, scores){
     return {passed: true, reason: '합격', failedSubjects: [], avg: avg, maxAvg: maxAvg};
   }
   if (avg < 60 - EPS) return {passed: false, reason: '평균 미달', failedSubjects: [], avg: avg, maxAvg: maxAvg};
+  if (scope && scope !== 'both') return {passed: true, reason: '기준 통과', failedSubjects: [], avg: avg, maxAvg: maxAvg};
   return {passed: true, reason: '합격권', failedSubjects: [], avg: avg, maxAvg: maxAvg};
 }
 function examFailConfirmed(level, scores){
@@ -531,7 +551,11 @@ const CIRCLE = ['①','②','③','④'];
 
 function startQuiz(list){
   endExamMode();
-  quiz = pickRandom(list, 5);
+  // 안 푼 문제 우선: 이 과목 기록(store)에서 attempts가 0인 문제부터, 모자라면 푼 문제에서 채움
+  const un = [], done = [];
+  list.forEach(q => (rec(q.id).attempts > 0 ? done : un).push(q));
+  quiz = pickRandom(un, 5);
+  if (quiz.length < 5) quiz = quiz.concat(pickRandom(done, 5 - quiz.length));
   qi = 0; answers = {};
   renderQuestion();
   show('quiz');
@@ -630,10 +654,15 @@ let exam = null; // {round, level, list, qi, answers, endsAt, startedAt, failSho
 let examTimerId = null;
 let lastExamMeta = null;
 function examKey(q){ return q._sid + ':' + q.id; }
-function examStateKey(round, level){ return 'gichul_exam_' + round + '_' + level + '차'; }
-function examQuestions(round, level){
+function examStateKey(round, level, scope){ return 'gichul_exam_' + round + '_' + level + '차' + (scope && scope !== 'both' ? '_' + scope : ''); }
+function currentExamScope(){
+  const level = parseInt(document.getElementById('ex-level').value, 10);
+  if (level !== 2) return 'both';
+  return document.getElementById('ex-scope').value || 'both';
+}
+function examQuestions(round, level, scope){
   const list = [];
-  EXAM_LEVELS[level].forEach(sid => {
+  examScopeSubjects(level, scope).forEach(sid => {
     SUBJECTS[sid].questions.filter(q => q.round === round)
       .slice().sort((a, b) => a.no - b.no)
       .forEach(q => { const c = Object.assign({}, q); c._sid = sid; list.push(c); });
@@ -642,13 +671,13 @@ function examQuestions(round, level){
 }
 function saveExamState(){
   if (!exam) return;
-  try{ localStorage.setItem(examStateKey(exam.round, exam.level), JSON.stringify({round: exam.round, level: exam.level, answers: exam.answers, qi: exam.qi, endsAt: exam.endsAt, startedAt: exam.startedAt})); }catch(e){}
+  try{ localStorage.setItem(examStateKey(exam.round, exam.level, exam.scope), JSON.stringify({round: exam.round, level: exam.level, scope: exam.scope, answers: exam.answers, qi: exam.qi, endsAt: exam.endsAt, startedAt: exam.startedAt})); }catch(e){}
 }
-function loadExamState(round, level){
-  try{ return JSON.parse(localStorage.getItem(examStateKey(round, level))); }catch(e){ return null; }
+function loadExamState(round, level, scope){
+  try{ return JSON.parse(localStorage.getItem(examStateKey(round, level, scope))); }catch(e){ return null; }
 }
-function clearExamState(round, level){
-  try{ localStorage.removeItem(examStateKey(round, level)); }catch(e){}
+function clearExamState(round, level, scope){
+  try{ localStorage.removeItem(examStateKey(round, level, scope)); }catch(e){}
 }
 function stopExamTimer(){ if (examTimerId){ clearInterval(examTimerId); examTimerId = null; } }
 function setExamMode(on){
@@ -663,14 +692,16 @@ function hideExamConfirm(){ document.getElementById('exam-confirm').classList.ad
 
 function startExam(round, level, opts){
   opts = opts || {};
-  const list = examQuestions(round, level);
+  const scope = opts.scope || 'both';
+  const minutes = examMinutes(level, scope);
+  const list = examQuestions(round, level, scope);
   if (!list.length) return;
   stopExamTimer();
-  const saved = opts.resume ? loadExamState(round, level) : null;
+  const saved = opts.resume ? loadExamState(round, level, scope) : null;
   exam = {
-    round: round, level: level, list: list, qi: 0,
+    round: round, level: level, scope: scope, minutes: minutes, list: list, qi: 0,
     answers: saved ? (saved.answers || {}) : {},
-    endsAt: saved && saved.endsAt ? saved.endsAt : Date.now() + EXAM_MINUTES * 60 * 1000,
+    endsAt: saved && saved.endsAt ? saved.endsAt : Date.now() + minutes * 60 * 1000,
     startedAt: saved && saved.startedAt ? saved.startedAt : Date.now(),
     failShown: false
   };
@@ -691,7 +722,7 @@ function startExamTimer(){
 function updateExamTimer(){
   if (!exam) return;
   const remain = Math.max(0, exam.endsAt - Date.now());
-  // 남은 초는 올림으로 표시: 시작 직후 80:00, 종료 순간 00:00
+  // 남은 초는 올림으로 표시: 시작 직후 만료 시간, 종료 순간 00:00
   const totalSec = Math.ceil(remain / 1000);
   const m = Math.floor(totalSec / 60), s = totalSec % 60;
   const el = document.getElementById('exam-timer');
@@ -793,31 +824,35 @@ function submitExam(timeUp){
   const ex = exam;
   const counts = examCount(ex.list, ex.answers);
   const scores = examScores(counts);
-  const verdict = examVerdict(ex.level, scores);
+  const verdict = examVerdict(ex.level, scores, ex.scope);
   recordExamAttempts(ex);
   const remainMs = Math.max(0, ex.endsAt - Date.now());
-  const elapsedMin = Math.min(EXAM_MINUTES, Math.max(0, Math.round((EXAM_MINUTES * 60 * 1000 - remainMs) / 60000)));
+  const elapsedMin = Math.min(ex.minutes, Math.max(0, Math.round((ex.minutes * 60 * 1000 - remainMs) / 60000)));
   const entry = {
-    round: ex.round, level: ex.level, date: new Date().toISOString().slice(0, 10),
+    round: ex.round, level: ex.level, scope: ex.scope, date: new Date().toISOString().slice(0, 10),
     scores: scores.map(s => ({short: SUBJECTS[s.sid].short, correct: s.correct, total: s.total, score: s.score})),
     avg: verdict.avg, passed: verdict.passed, reason: verdict.reason, timeUp: !!timeUp, elapsedMin: elapsedMin
   };
   saveExamHistory(entry);
-  clearExamState(ex.round, ex.level);
-  lastExamMeta = {round: ex.round, level: ex.level};
+  clearExamState(ex.round, ex.level, ex.scope);
+  lastExamMeta = {round: ex.round, level: ex.level, scope: ex.scope};
   renderExamResult(entry, ex, scores, verdict, timeUp);
   endExamMode();
   renderStats();
   show('exam-result');
 }
 function renderExamResult(entry, ex, scores, verdict, timeUp){
+  const scopeLabel = (ex.scope && ex.scope !== 'both') ? ' · ' + SUBJECTS[ex.scope].short + '만' : '';
   document.getElementById('exam-res-sub').textContent =
-    ex.round + ' ' + ex.level + '차 모의고사 · ' + ex.list.length + '문항' + (timeUp ? ' · 시간 종료로 제출됐어요' : '') + ' · ' + entry.elapsedMin + '분 소요';
+    ex.round + ' ' + ex.level + '차' + scopeLabel + ' 모의고사 · ' + ex.list.length + '문항' + (timeUp ? ' · 시간 종료로 제출됐어요' : '') + ' · ' + entry.elapsedMin + '분 소요';
   const v = document.getElementById('exam-verdict');
   v.className = 'verdict ' + (verdict.passed ? 'pass' : 'fail');
   if (verdict.passed){
-    v.innerHTML = (ex.level === 1 ? '합격' : '선발 기준 통과') +
-      '<div class="verdict-sub">평균 ' + fmtScore(verdict.avg) + '점' + (ex.level === 2 ? ' · 최근 3년 합격선 93.75~95점 — 60점은 출발선일 뿐이에요' : '') + '</div>';
+    const label = ex.level === 1 ? '합격' : (ex.scope && ex.scope !== 'both' ? '기준 통과' : '선발 기준 통과');
+    const sub = ex.level === 1 ? '' : (ex.scope && ex.scope !== 'both'
+      ? ' · 단독 과목 연습 — 실제 합격선은 2과목 평균 93.75~95점'
+      : ' · 최근 3년 합격선 93.75~95점 — 60점은 출발선일 뿐이에요');
+    v.innerHTML = label + '<div class="verdict-sub">평균 ' + fmtScore(verdict.avg) + '점' + sub + '</div>';
   } else {
     const reason = verdict.reason === '과락'
       ? verdict.failedSubjects.map(sid => SUBJECTS[sid].short).join(', ') + ' 과락 (40점 미만)'
@@ -828,7 +863,7 @@ function renderExamResult(entry, ex, scores, verdict, timeUp){
     '<div class="topic-stat"><span>' + SUBJECTS[s.sid].short + ' (' + s.correct + '/' + s.total + ')</span><span>' +
     fmtScore(s.score) + '점' + (ex.level === 1 && s.score < 40 - EPS ? ' · 과락' : '') + '</span></div>'
   ).join('') +
-  '<div class="topic-stat"><span>평균</span><span>' + fmtScore(verdict.avg) + '점</span></div>';
+  (scores.length > 1 ? '<div class="topic-stat"><span>평균</span><span>' + fmtScore(verdict.avg) + '점</span></div>' : '');
   const wrongs = ex.list.filter(q => {
     const a = ex.answers[examKey(q)];
     return a === undefined || (a + 1) !== q.answer;
@@ -860,7 +895,7 @@ function renderExamHistory(){
     return;
   }
   el.innerHTML = h.slice(0, 5).map(e =>
-    '<div class="topic-stat"><span>' + e.round + ' ' + e.level + '차 · ' + e.date + '</span><span>평균 ' + fmtScore(e.avg) + '점 · ' + (e.passed ? (e.level === 2 ? '기준 통과' : '합격') : '불합격') + (e.elapsedMin != null ? ' · ' + e.elapsedMin + '분' : '') + '</span></div>'
+    '<div class="topic-stat"><span>' + e.round + ' ' + e.level + '차' + (e.scope && e.scope !== 'both' ? ' · ' + SUBJECTS[e.scope].short + '만' : '') + ' · ' + e.date + '</span><span>평균 ' + fmtScore(e.avg) + '점 · ' + (e.passed ? (e.level === 2 ? '기준 통과' : '합격') : '불합격') + (e.elapsedMin != null ? ' · ' + e.elapsedMin + '분' : '') + '</span></div>'
   ).join('');
 }
 /* 모의고사 설정 (홈) */
@@ -872,16 +907,22 @@ function examRoundOptions(){
 function updateExamInfo(){
   const round = document.getElementById('ex-round').value;
   const level = parseInt(document.getElementById('ex-level').value, 10);
-  const list = examQuestions(round, level);
-  const excluded = 80 - list.length;
-  const counts = EXAM_LEVELS[level].map(sid => {
+  const scope = currentExamScope();
+  document.getElementById('ex-scope-row').classList.toggle('hidden', level !== 2);
+  const list = examQuestions(round, level, scope);
+  const minutes = examMinutes(level, scope);
+  const expected = scope === 'both' ? 80 : 40;
+  const excluded = expected - list.length;
+  const counts = examScopeSubjects(level, scope).map(sid => {
     const n = list.filter(q => q._sid === sid).length;
     return SUBJECTS[sid].short + ' ' + n;
   }).join(' + ');
+  const scopeLabel = scope !== 'both' ? ' · ' + SUBJECTS[scope].short + '만' : '';
   document.getElementById('exam-info').innerHTML =
-    round + ' ' + level + '차 · <b>' + list.length + '문항</b>' + (excluded > 0 ? ' (구법 제외 ' + excluded + '문항)' : '') +
-    ' · 80분 · ' + counts;
-  const saved = loadExamState(round, level);
+    round + ' ' + level + '차' + scopeLabel + ' · <b>' + list.length + '문항</b>' + (excluded > 0 ? ' (구법 제외 ' + excluded + '문항)' : '') +
+    ' · ' + minutes + '분 · ' + counts;
+  document.getElementById('btn-exam-start').textContent = '모의고사 시작 (' + minutes + '분)';
+  const saved = loadExamState(round, level, scope);
   const rb = document.getElementById('btn-exam-resume');
   if (saved){
     const done = Object.keys(saved.answers || {}).length;
@@ -894,20 +935,21 @@ function updateExamInfo(){
 document.getElementById('btn-exam-start').addEventListener('click', () => {
   const round = document.getElementById('ex-round').value;
   const level = parseInt(document.getElementById('ex-level').value, 10);
-  startExam(round, level, {});
+  startExam(round, level, {scope: currentExamScope()});
 });
 document.getElementById('btn-exam-resume').addEventListener('click', () => {
   const round = document.getElementById('ex-round').value;
   const level = parseInt(document.getElementById('ex-level').value, 10);
-  startExam(round, level, {resume: true});
+  startExam(round, level, {resume: true, scope: currentExamScope()});
 });
+document.getElementById('ex-scope').addEventListener('change', updateExamInfo);
 document.getElementById('btn-exam-submit').addEventListener('click', () => requestExamSubmit(false));
 document.getElementById('btn-exam-confirm-yes').addEventListener('click', () => { hideExamConfirm(); submitExam(false); });
 document.getElementById('btn-exam-confirm-no').addEventListener('click', hideExamConfirm);
 document.getElementById('ex-round').addEventListener('change', updateExamInfo);
 document.getElementById('ex-level').addEventListener('change', updateExamInfo);
 document.getElementById('btn-exam-again').addEventListener('click', () => {
-  if (lastExamMeta) startExam(lastExamMeta.round, lastExamMeta.level, {});
+  if (lastExamMeta) startExam(lastExamMeta.round, lastExamMeta.level, {scope: lastExamMeta.scope || 'both'});
 });
 document.getElementById('btn-exam-home').addEventListener('click', () => { renderStats(); renderExamHistory(); updateExamInfo(); show('home'); });
 
