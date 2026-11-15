@@ -176,6 +176,7 @@
       <div class="count" id="filter-count"></div>
       <button class="btn btn-primary" id="btn-start">5문제 풀기</button>
       <button class="btn btn-ghost" id="btn-review">복습하기 <span id="review-count"></span></button>
+      <button class="btn btn-ghost" id="btn-records">기록 보기 <span id="record-count"></span></button>
     </div>
 
     <div class="card">
@@ -284,6 +285,24 @@
       </div>
       <button class="btn btn-primary" id="btn-review-quiz" style="margin:0 0 14px;">복습 5문제 풀기</button>
       <div id="review-list"></div>
+    </div>
+  </div>
+
+  <!-- ===== 기록 보기 ===== -->
+  <div id="view-records" class="hidden">
+    <div class="topbar">
+      <button class="link-btn" id="btn-home3">← 처음으로</button>
+      <div class="progress">기록 보기</div>
+    </div>
+    <div class="card">
+      <h2>푼 문제 기록</h2>
+      <div class="sub" id="records-sub"></div>
+      <div class="seg">
+        <button data-rseg="all" class="on">전체</button>
+        <button data-rseg="correct">맞은 것만</button>
+        <button data-rseg="wrong">틀린 것만</button>
+      </div>
+      <div id="records-list"></div>
     </div>
   </div>
 
@@ -473,6 +492,8 @@ function renderStats(){
     ...Object.keys(store).filter(k => store[k].wrong > 0),
     ...Object.keys(store).filter(k => store[k].vague)
   ]).size) + '개)' : '';
+  const solvedQs = Object.keys(store).filter(k => (store[k].attempts || 0) > 0).length;
+  document.getElementById('record-count').textContent = solvedQs > 0 ? '(' + solvedQs + '개)' : '';
   // 주제별 정답률 (3회 이상 푼 주제만)
   const qById = {}; QUESTIONS.forEach(q => qById[q.id] = q);
   Object.entries(store).forEach(([qid, r]) => {
@@ -498,7 +519,7 @@ updateExamInfo();
 renderExamHistory();
 
 /* ---------- 화면 전환 ---------- */
-const views = ['home','quiz','result','review','exam-result'];
+const views = ['home','quiz','result','review','records','exam-result'];
 function show(name){
   views.forEach(v => document.getElementById('view-' + v).classList.toggle('hidden', v !== name));
   try{ window.scrollTo(0, 0); }catch(e){}
@@ -1044,6 +1065,62 @@ document.getElementById('btn-review-quiz').addEventListener('click', () => {
   if (!items.length){ alert('복습할 문제가 없어요.'); return; }
   startQuiz(items);
 });
+
+/* ---------- 기록 보기 ---------- */
+let recordSeg = 'all';
+function recordItems(){
+  const ids = Object.keys(store).filter(k => (store[k].attempts || 0) > 0);
+  const qById = {}; QUESTIONS.forEach(q => qById[q.id] = q);
+  return ids.map(id => ({q: qById[id], r: store[id]})).filter(x => x.q)
+    .filter(x => recordSeg === 'all' || (recordSeg === 'correct' ? x.r.wrong === 0 : x.r.wrong > 0))
+    .sort((a, b) => (b.r.lastAt || 0) - (a.r.lastAt || 0));
+}
+function renderRecords(){
+  const items = recordItems();
+  const solvedQs = Object.keys(store).filter(k => (store[k].attempts || 0) > 0).length;
+  document.getElementById('records-sub').textContent =
+    SUBJECTS[activeSubject].short + ' · 푼 문제 ' + solvedQs + '개';
+  const el = document.getElementById('records-list');
+  if (!items.length){
+    el.innerHTML = '<div class="empty">아직 푼 문제가 없어요.<br>5문제를 풀면 여기에 기록이 쌓입니다.</div>';
+    return;
+  }
+  el.innerHTML = items.map(({q, r}) => {
+    const correctN = r.correct || 0, wrongN = r.wrong || 0;
+    return '<div class="rev-item" data-qid="' + q.id + '">' +
+      '<div class="qmeta">' +
+      '<span class="tag">' + q.round + ' ' + q.no + '번</span>' +
+      '<span class="tag">' + q.basis + '</span>' +
+      (q.article ? '<span class="tag art">' + q.article + '</span>' : '') +
+      q.topics.map(t => '<span class="tag">' + t + '</span>').join('') +
+      '<span class="tag" style="color:var(--ok);">' + (correctN ? '맞음 ' + correctN + '회' : '') + '</span>' +
+      (wrongN ? '<span class="tag" style="color:var(--bad);">틀림 ' + wrongN + '회</span>' : '') +
+      (r.vague ? '<span class="tag" style="color:var(--vague);">애매</span>' : '') +
+      '</div>' +
+      '<div class="stem">' + escapeHtml(q.stem) + '</div>' +
+      '<div style="font-size:13px;color:var(--muted);">정답: ' + CIRCLE[q.answer - 1] + ' ' + escapeHtml(q.choices[q.answer - 1]) + '</div>' +
+      (q.hint ? '<div class="hint"><b>한 줄 정리</b><br>' + escapeHtml(q.hint) + '</div>' : '') +
+      (r.memo ? '<div class="memo-view"><b>내 메모</b><br>' + escapeHtml(r.memo) + '</div>' : '') +
+      '<button class="btn btn-ghost btn-small" data-solve="' + q.id + '">이 문제 다시 풀기</button>' +
+      '</div>';
+  }).join('');
+  el.querySelectorAll('[data-solve]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const q = QUESTIONS.find(x => x.id === btn.dataset.solve);
+      if (q){ quiz = [q]; qi = 0; answers = {}; renderQuestion(); show('quiz'); }
+    });
+  });
+}
+document.querySelectorAll('[data-rseg]').forEach(b => {
+  b.addEventListener('click', () => {
+    recordSeg = b.dataset.rseg;
+    document.querySelectorAll('[data-rseg]').forEach(x => x.classList.toggle('on', x === b));
+    renderRecords();
+  });
+});
+document.getElementById('btn-records').addEventListener('click', () => { renderRecords(); show('records'); });
+document.getElementById('btn-home3').addEventListener('click', () => { renderStats(); show('home'); });
 </script>
 </body>
 </html>
