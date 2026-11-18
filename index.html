@@ -283,6 +283,7 @@
         <button data-seg="wrong">틀린 것만</button>
         <button data-seg="vague">애매한 것만</button>
       </div>
+      <div class="row" style="margin:0 0 12px;"><label>회차<select id="review-round"></select></label></div>
       <button class="btn btn-primary" id="btn-review-quiz" style="margin:0 0 14px;">복습 5문제 풀기</button>
       <div id="review-list"></div>
     </div>
@@ -302,6 +303,7 @@
         <button data-rseg="correct">맞은 것만</button>
         <button data-rseg="wrong">틀린 것만</button>
       </div>
+      <div class="row" style="margin:0 0 12px;"><label>회차<select id="records-round"></select></label></div>
       <div id="records-list"></div>
     </div>
   </div>
@@ -414,6 +416,8 @@ const TOPIC_ORDERS = {'gyeongbiupbeop': ['허가','결격사유','교육','배�
 'gyeonghohak': ['위해분석','근접경호','경호기획·임무절차','경호원칙·분류','우발상황·대응','대통령경호법','차량경호','출입통제','경호장비·복장','경호개념·이념','검측·검식','경호조직','선발경호','테러방지법','경호의전·예절','응급처치','경호환경','경호관련법·법원','경호역사','경호원·윤리','테러·암살']};
 let topicsPresent = {};
 const selectedTopics = new Set();
+let reviewRound = '';
+let recordRound = '';
 
 function fillSelect(el, values, label){
   el.innerHTML = '<option value="">' + label + '</option>' +
@@ -440,6 +444,11 @@ function buildFilterUI(){
   });
   const rounds = [...new Set(QUESTIONS.map(q => q.round))].sort();
   fillSelect(document.getElementById('f-round'), rounds, '전체 회차');
+  reviewRound = ''; recordRound = '';
+  fillSelect(document.getElementById('review-round'), rounds, '전체 회차');
+  fillSelect(document.getElementById('records-round'), rounds, '전체 회차');
+  document.getElementById('review-round').onchange = e => { reviewRound = e.target.value; renderReview(); };
+  document.getElementById('records-round').onchange = e => { recordRound = e.target.value; renderRecords(); };
   const bases = [...new Set(QUESTIONS.map(q => q.basis))];
   fillSelect(document.getElementById('f-basis'), bases, '전체 근거');
   const articles = [...new Set(QUESTIONS.map(q => q.article).filter(Boolean))].sort((a,b)=>{
@@ -1016,6 +1025,7 @@ function reviewItems(){
   const qById = {}; QUESTIONS.forEach(q => qById[q.id] = q);
   return ids.map(id => ({q: qById[id], r: store[id]})).filter(x => x.q)
     .filter(x => reviewSeg === 'all' || (reviewSeg === 'wrong' ? x.r.wrong > 0 : x.r.vague))
+    .filter(x => !reviewRound || x.q.round === reviewRound)
     .sort((a, b) => (b.r.lastAt || 0) - (a.r.lastAt || 0));
 }
 function renderReview(){
@@ -1073,6 +1083,7 @@ function recordItems(){
   const qById = {}; QUESTIONS.forEach(q => qById[q.id] = q);
   return ids.map(id => ({q: qById[id], r: store[id]})).filter(x => x.q)
     .filter(x => recordSeg === 'all' || (recordSeg === 'correct' ? x.r.wrong === 0 : x.r.wrong > 0))
+    .filter(x => !recordRound || x.q.round === recordRound)
     .sort((a, b) => (b.r.lastAt || 0) - (a.r.lastAt || 0));
 }
 function renderRecords(){
